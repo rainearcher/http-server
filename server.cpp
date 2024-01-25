@@ -8,6 +8,9 @@
 #include <getopt.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#include <iostream>
+#include <vector>
+#include <string>
 
 /**
  * Project 1 starter code
@@ -123,6 +126,17 @@ void parse_args(int argc, char *argv[], struct server_app *app)
     }
 }
 
+std::vector<std::string> split(std::string str, const std::string& delim) {
+    std::vector<std::string> tokens;
+    size_t pos = 0;
+    while ((pos = str.find(delim)) != std::string::npos) {
+        std::string token = str.substr(0, pos);
+        tokens.push_back(token);
+        str.erase(0, pos + delim.size());
+    }
+    return tokens;
+}
+
 void handle_request(struct server_app *app, int client_socket) {
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read;
@@ -139,19 +153,31 @@ void handle_request(struct server_app *app, int client_socket) {
 
     buffer[bytes_read] = '\0';
     // copy buffer to a new string
-    char *request = static_cast<char*>(malloc(strlen(buffer) + 1));
-    strcpy(request, buffer);
+    std::string request(buffer);
+
+    std::vector<std::string> requestTokens = split(request, "\r\n");
+    std::vector<std::string> requestLineTokens = split(requestTokens[0], " ");
+
+    for (auto token : requestTokens) {
+        std::cout << token << "\n";
+    }
+
+    std::cout << "remote host: " << app->remote_host << "\n";
+    std::cout << app->remote_port << "\n";
+    std::cout << app->server_port << "\n";
 
     // TODO: Parse the header and extract essential fields, e.g. file name
     // Hint: if the requested path is "/" (root), default to index.html
-    char file_name[] = "index.html";
+    std::string requestURI = requestLineTokens[1];
+    requestURI.erase(0,1);
+    std::string file_name = requestURI == "" ? "index.html" : requestURI;
 
     // TODO: Implement proxy and call the function under condition
     // specified in the spec
     // if (need_proxy(...)) {
     //    proxy_remote_file(app, client_socket, file_name);
     // } else {
-    serve_local_file(client_socket, file_name);
+    serve_local_file(client_socket, file_name.c_str());
     //}
 }
 
