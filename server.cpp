@@ -11,6 +11,8 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <fstream>
+#include <sstream>
 
 /**
  * Project 1 starter code
@@ -193,13 +195,26 @@ void serve_local_file(int client_socket, const char *path) {
     // (When the requested file does not exist):
     // * Generate a correct response
 
-    char response[] = "HTTP/1.0 200 OK\r\n"
-                      "Content-Type: text/plain; charset=UTF-8\r\n"
-                      "Content-Length: 15\r\n"
-                      "\r\n"
-                      "Sample response";
-
-    send(client_socket, response, strlen(response), 0);
+    std::string response;
+    std::fstream file(path);
+    if (file.good()) {
+        response = "HTTP/1.0 200 OK\r\n"
+                      "Content-Type: text/html; charset=UTF-8\r\n"
+                      "Content-Length: ";
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string fileContent = buffer.str();
+        response.append(std::to_string(fileContent.length()) + "\r\n\r\n");
+        response.append(fileContent);
+    }
+    else {
+        response = "HTTP/1.0 404 Not Found\r\n"
+                    "Content-Type: text/plain; charset=UTF-8\r\n"
+                    "Content-Length: 15\r\n"
+                    "\r\n"
+                    "File not found.";
+    }
+    send(client_socket, response.c_str(), response.length(), 0);
 }
 
 void proxy_remote_file(struct server_app *app, int client_socket, const char *request) {
