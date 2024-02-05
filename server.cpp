@@ -172,6 +172,11 @@ void handle_request(struct server_app *app, int client_socket) {
     // Hint: if the requested path is "/" (root), default to index.html
     std::string requestURI = requestLineTokens[1];
     requestURI.erase(0,1);
+    size_t pos = requestURI.find("%20");
+    while (pos != std::string::npos) {
+        requestURI.replace(pos, 3, " ");
+        pos = requestURI.find("%20");
+    }
     std::string file_name = requestURI == "" ? "index.html" : requestURI;
 
     // TODO: Implement proxy and call the function under condition
