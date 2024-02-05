@@ -21,7 +21,7 @@
 
 #define BUFFER_SIZE 1024
 #define DEFAULT_SERVER_PORT 8081
-#define DEFAULT_REMOTE_HOST "131.179.176.34"
+#define DEFAULT_REMOTE_HOST "127.0.0.1"
 #define DEFAULT_REMOTE_PORT 5001
 
 struct server_app {
@@ -41,7 +41,7 @@ void parse_args(int argc, char *argv[], struct server_app *app);
 // The following functions need to be updated
 void handle_request(struct server_app *app, int client_socket);
 void serve_local_file(int client_socket, const std::string& path);
-void proxy_remote_file(struct server_app *app, int client_socket, const char *path);
+void proxy_remote_file(struct server_app *app, int client_socket, const std::string& request);
 
 // The main function is provided and no change is needed
 int main(int argc, char *argv[])
@@ -139,6 +139,16 @@ std::vector<std::string> split(std::string str, const std::string& delim) {
     return tokens;
 }
 
+std::string get_file_extension(const std::string& str) {
+    for (auto it = str.end(); it >= str.begin(); it--) {
+        if (*it == '.') {
+            return std::string(it+1, str.end());
+            break;
+        }
+    }
+    return "";
+}
+
 void handle_request(struct server_app *app, int client_socket) {
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read;
@@ -184,7 +194,13 @@ void handle_request(struct server_app *app, int client_socket) {
     // if (need_proxy(...)) {
     //    proxy_remote_file(app, client_socket, file_name);
     // } else {
-    serve_local_file(client_socket, file_name);
+    std::string ext = get_file_extension(file_name);
+    if (ext == "ts") {
+        proxy_remote_file(app, client_socket, request);
+    }
+    else {
+        serve_local_file(client_socket, file_name);
+    }
     //}
 }
 
@@ -201,13 +217,7 @@ void serve_local_file(int client_socket, const std::string& path) {
     // * Generate a correct response
 
     // get file extension
-    std::string extension = "";
-    for (auto it = path.end(); it >= path.begin(); it--) {
-        if (*it == '.') {
-            extension = std::string(it+1, path.end());
-            break;
-        }
-    }
+    std::string extension = get_file_extension(path);
 
     std::string response;
     std::fstream file(path);
@@ -264,7 +274,7 @@ void serve_local_file(int client_socket, const std::string& path) {
     send(client_socket, response.c_str(), response.length(), 0);
 }
 
-void proxy_remote_file(struct server_app *app, int client_socket, const char *request) {
+void proxy_remote_file(struct server_app *app, int client_socket, const std::string& request) {
     // TODO: Implement proxy request and replace the following code
     // What's needed:
     // * Connect to remote server (app->remote_server/app->remote_port)
@@ -273,7 +283,69 @@ void proxy_remote_file(struct server_app *app, int client_socket, const char *re
     // Bonus:
     // * When connection to the remote server fail, properly generate
     // HTTP 502 "Bad Gateway" response
+    int backend_socket;
+    if ((backend_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        std::cout << "socket creation error\n";
+        char response[] = "HTTP/1.0 502 Bad Gateway \r\n\r\n";
+        send(client_socket, response, strlen(response), 0);
+        return;
+    }
+    struct sockaddr_in backend_addr;
+    backend_addr.sin_family = AF_INET;
+    backend_addr.sin_port = htons(app->remote_port);
 
-    char response[] = "HTTP/1.0 501 Not Implemented\r\n\r\n";
-    send(client_socket, response, strlen(response), 0);
+    if (inet_pton(AF_INET, app->remote_host, &backend_addr.sin_addr) <= 0) {
+        std::cout << "invalid address/address not supported\n";
+        char response[] = "HTTP/1.0 502 Bad Gateway \r\n\r\n";
+        send(client_socket, response, strlen(response), 0);
+        return;
+    }
+
+    int status;
+    if ((status = connect(backend_socket, (struct sockaddr*)&backend_addr, sizeof(backend_addr)))) {
+        std::cout << "backend connection failed\n";
+        char response[] = "HTTP/1.0 502 Bad Gateway \r\n\r\n";
+        send(client_socket, response, strlen(response), 0);
+        return;
+    }
+    send(backend_socket, request.c_str(), request.length(), 0);
+    std::cout << "backend message sent\n";
+    char buffer[BUFFER_SIZE];
+    size_t bytes_read;                 
+    std::string response = "";
+    do {
+        bytes_read = recv(backend_socket, buffer, BUFFER_SIZE - 1, 0);
+        if (bytes_read <= 0) {
+            break;
+        }
+        buffer[bytes_read] = '\0';
+        send(client_socket, buffer, bytes_read, 0);
+        response.append(buffer, bytes_read);
+    } while (bytes_read > 0);
+
+    std::cout << "backend message received\n";
+    close(backend_socket);
+    // ssize_t bytes_read;
+    // if ((bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0)) <= 0) {
+    //     std::cout << "error receiving message from backend\n";
+    //     char response[] = "HTTP/1.0 502 Bad Gateway \r\n\r\n";
+    //     send(client_socket, response, strlen(response), 0);
+    //     return;
+    // }
+    // buffer[bytes_read] = '\0';
+    //std::cout << "client message:\n";
+    //std::cout << response;
+
+    // size_t length = response.length();
+    // char cstr[length];
+    // char *ptr = cstr;
+    // strcpy(ptr, response.c_str());
+    // while (length > 0) {
+    //     int i = send(client_socket, ptr, length, 0);
+    //     if (i < 1) exit(1);
+    //     ptr += i;
+    //     length -= i;
+    // }
+
+    //send(client_socket, response.c_str(), response.length(), 0);
 }

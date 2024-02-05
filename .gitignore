@@ -4,3 +4,7 @@ server
 *.txt
 binaryfile
 downloadfile
+*.ts
+backend
+*.zip
+*.7z
