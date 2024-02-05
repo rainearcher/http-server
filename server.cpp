@@ -32,6 +32,12 @@ void handle_request(struct server_app *app, int client_socket);
 void serve_local_file(int client_socket, const std::string& path);
 void proxy_remote_file(struct server_app *app, int client_socket, const std::string& request);
 
+std::string receive_client_request(int socket);
+std::string parse_filename_from_request(const std::string& request);
+std::string decode_uri(const std::string &value);
+std::string get_file_extension(const std::string& str);
+
+
 int main(int argc, char *argv[])
 {
     struct server_app app;
@@ -127,19 +133,51 @@ std::vector<std::string> split(std::string str, const std::string& delim) {
     return tokens;
 }
 
-std::string get_file_extension(const std::string& str) {
-    for (auto it = str.end(); it >= str.begin(); it--) {
-        if (*it == '.') {
-            return std::string(it+1, str.end());
-            break;
-        }
+void handle_request(struct server_app *app, int client_socket) {
+    std::string request = receive_client_request(client_socket);
+    std::string filename = parse_filename_from_request(request);
+
+    if (get_file_extension(filename) == "ts") {
+        proxy_remote_file(app, client_socket, request);
     }
-    return "";
+    else {
+        serve_local_file(client_socket, filename);
+    }
 }
 
-std::string url_decode(const std::string &value) {
+std::string receive_client_request(int socket) {
+    char buffer[BUFFER_SIZE];
+    ssize_t bytes_read;
+
+    bytes_read = recv(socket, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_read <= 0) {// Connection closed or error
+        exit(1);
+    }
+
+    buffer[bytes_read] = '\0';
+    return std::string(buffer);
+}
+
+std::string parse_filename_from_request(const std::string& request) {
+
+    std::vector<std::string> requestTokens = split(request, "\r\n");
+    std::vector<std::string> requestLineTokens = split(requestTokens[0], " ");
+
+    for (auto token : requestTokens) {
+        std::cout << token << "\n";
+    }
+
+    std::string requestURI = requestLineTokens[1];
+    requestURI.erase(0,1);
+
+    requestURI = decode_uri(requestURI);
+    return requestURI == "" ? "index.html" : requestURI;
+
+}
+
+std::string decode_uri(const std::string &uri) {
     std::string decoded;
-    std::stringstream ss(value);
+    std::stringstream ss(uri);
 
     while (!ss.eof()) {
         int hex;
@@ -161,38 +199,14 @@ std::string url_decode(const std::string &value) {
     return decoded;
 }
 
-void handle_request(struct server_app *app, int client_socket) {
-    char buffer[BUFFER_SIZE];
-    ssize_t bytes_read;
-
-    bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_read <= 0) {
-        return;  // Connection closed or error
+std::string get_file_extension(const std::string& str) {
+    for (auto it = str.end(); it >= str.begin(); it--) {
+        if (*it == '.') {
+            return std::string(it+1, str.end());
+            break;
+        }
     }
-
-    buffer[bytes_read] = '\0';
-    std::string request(buffer);
-
-    std::vector<std::string> requestTokens = split(request, "\r\n");
-    std::vector<std::string> requestLineTokens = split(requestTokens[0], " ");
-
-    for (auto token : requestTokens) {
-        std::cout << token << "\n";
-    }
-
-    std::string requestURI = requestLineTokens[1];
-    requestURI.erase(0,1);
-
-    requestURI = url_decode(requestURI);
-    std::string file_name = requestURI == "" ? "index.html" : requestURI;
-    std::string ext = get_file_extension(file_name);
-
-    if (ext == "ts") {
-        proxy_remote_file(app, client_socket, request);
-    }
-    else {
-        serve_local_file(client_socket, file_name);
-    }
+    return "";
 }
 
 void serve_local_file(int client_socket, const std::string& path) {
