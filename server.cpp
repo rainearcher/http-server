@@ -149,6 +149,37 @@ std::string get_file_extension(const std::string& str) {
     return "";
 }
 
+std::string url_decode(const std::string &value) {
+    std::string decoded;
+    std::stringstream ss(value);
+
+    while (!ss.eof()) {
+        int hex;
+        char c;
+        
+        // Read characters until encountering '%'
+        while (ss.peek() != '%' && !ss.eof()) {
+            decoded += ss.get();
+        }
+
+        if (ss.peek() == '%') {
+            // Skip '%'
+            ss.ignore();
+
+            // Read two hexadecimal characters
+            ss >> std::hex >> hex;
+            
+            // Convert hexadecimal value to character
+            c = static_cast<char>(hex);
+            
+            // Add character to decoded string
+            decoded += c;
+        }
+    }
+
+    return decoded;
+}
+
 void handle_request(struct server_app *app, int client_socket) {
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read;
@@ -181,12 +212,19 @@ void handle_request(struct server_app *app, int client_socket) {
     // TODO: Parse the header and extract essential fields, e.g. file name
     // Hint: if the requested path is "/" (root), default to index.html
     std::string requestURI = requestLineTokens[1];
+    std::cout << requestURI << '\n';
     requestURI.erase(0,1);
-    size_t pos = requestURI.find("%20");
-    while (pos != std::string::npos) {
-        requestURI.replace(pos, 3, " ");
-        pos = requestURI.find("%20");
-    }
+    // size_t pos = requestURI.find("%20");
+    // while (pos != std::string::npos) {
+    //     requestURI.replace(pos, 3, " ");
+    //     pos = requestURI.find("%20");
+    // }
+    // pos = requestURI.find("%");
+    // while (pos != std::string::npos && pos < requestURI.length() - 2) {
+
+    // }
+    requestURI = url_decode(requestURI);
+    std::cout << requestURI << '\n';
     std::string file_name = requestURI == "" ? "index.html" : requestURI;
 
     // TODO: Implement proxy and call the function under condition
