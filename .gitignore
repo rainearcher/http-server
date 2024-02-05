@@ -1,2 +1,6 @@
 *.code-workspace
 server
+*.jpg
+*.txt
+binaryfile
+downloadfile

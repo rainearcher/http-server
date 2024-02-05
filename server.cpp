@@ -40,7 +40,7 @@ void parse_args(int argc, char *argv[], struct server_app *app);
 
 // The following functions need to be updated
 void handle_request(struct server_app *app, int client_socket);
-void serve_local_file(int client_socket, const char *path);
+void serve_local_file(int client_socket, const std::string& path);
 void proxy_remote_file(struct server_app *app, int client_socket, const char *path);
 
 // The main function is provided and no change is needed
@@ -179,11 +179,11 @@ void handle_request(struct server_app *app, int client_socket) {
     // if (need_proxy(...)) {
     //    proxy_remote_file(app, client_socket, file_name);
     // } else {
-    serve_local_file(client_socket, file_name.c_str());
+    serve_local_file(client_socket, file_name);
     //}
 }
 
-void serve_local_file(int client_socket, const char *path) {
+void serve_local_file(int client_socket, const std::string& path) {
     // TODO: Properly implement serving of local files
     // The following code returns a dummy response for all requests
     // but it should give you a rough idea about what a proper response looks like
@@ -195,9 +195,26 @@ void serve_local_file(int client_socket, const char *path) {
     // (When the requested file does not exist):
     // * Generate a correct response
 
+    // get file extension
+    std::string extension = "";
+    for (auto it = path.end(); it >= path.begin(); it--) {
+        if (*it == '.') {
+            extension = std::string(it+1, path.end());
+            break;
+        }
+    }
+
     std::string response;
     std::fstream file(path);
-    if (file.good()) {
+    if (!file.good()) {
+        response = "HTTP/1.0 404 Not Found\r\n"
+            "Content-Type: text/plain; charset=UTF-8\r\n"
+            "Content-Length: 15\r\n"
+            "\r\n"
+            "File not found.";
+    }
+
+    else if (extension == "html") {
         response = "HTTP/1.0 200 OK\r\n"
                       "Content-Type: text/html; charset=UTF-8\r\n"
                       "Content-Length: ";
@@ -207,13 +224,38 @@ void serve_local_file(int client_socket, const char *path) {
         response.append(std::to_string(fileContent.length()) + "\r\n\r\n");
         response.append(fileContent);
     }
-    else {
-        response = "HTTP/1.0 404 Not Found\r\n"
-                    "Content-Type: text/plain; charset=UTF-8\r\n"
-                    "Content-Length: 15\r\n"
-                    "\r\n"
-                    "File not found.";
+
+    else if (extension == "txt") {
+        response = "HTTP/1.0 200 OK\r\n"
+                      "Content-Type: text/plain; charset=UTF-8\r\n"
+                      "Content-Length: ";
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string fileContent = buffer.str();
+        response.append(std::to_string(fileContent.length()) + "\r\n\r\n");
+        response.append(fileContent);
     }
+    else if (extension == "jpg") {
+        response = "HTTP/1.0 200 OK\r\n"
+                      "Content-Type: image/jpeg\r\n"
+                      "Content-Length: ";
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string fileContent = buffer.str();
+        response.append(std::to_string(fileContent.length()) + "\r\n\r\n");
+        response.append(fileContent);
+    }
+    else {
+        response = "HTTP/1.0 200 OK\r\n"
+                      "Content-Type: application/octet-stream\r\n"
+                      "Content-Length: ";
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        std::string fileContent = buffer.str();
+        response.append(std::to_string(fileContent.length()) + "\r\n\r\n");
+        response.append(fileContent);
+    }
+
     send(client_socket, response.c_str(), response.length(), 0);
 }
 
