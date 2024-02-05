@@ -14,36 +14,24 @@
 #include <fstream>
 #include <sstream>
 
-/**
- * Project 1 starter code
- * All parts needed to be changed/added are marked with TODO
- */
-
 #define BUFFER_SIZE 1024
 #define DEFAULT_SERVER_PORT 8081
 #define DEFAULT_REMOTE_HOST "127.0.0.1"
 #define DEFAULT_REMOTE_PORT 5001
 
 struct server_app {
-    // Parameters of the server
-    // Local port of HTTP server
     uint16_t server_port;
 
-    // Remote host and port of remote proxy
-    char *remote_host;
-    uint16_t remote_port;
+    char *backend_host;
+    uint16_t backend_port;
 };
 
-// The following function is implemented for you and doesn't need
-// to be change
-void parse_args(int argc, char *argv[], struct server_app *app);
 
-// The following functions need to be updated
+void parse_args(int argc, char *argv[], struct server_app *app);
 void handle_request(struct server_app *app, int client_socket);
 void serve_local_file(int client_socket, const std::string& path);
 void proxy_remote_file(struct server_app *app, int client_socket, const std::string& request);
 
-// The main function is provided and no change is needed
 int main(int argc, char *argv[])
 {
     struct server_app app;
@@ -102,8 +90,8 @@ void parse_args(int argc, char *argv[], struct server_app *app)
     int opt;
 
     app->server_port = DEFAULT_SERVER_PORT;
-    app->remote_host = NULL;
-    app->remote_port = DEFAULT_REMOTE_PORT;
+    app->backend_host = NULL;
+    app->backend_port = DEFAULT_REMOTE_PORT;
 
     while ((opt = getopt(argc, argv, "b:r:p:")) != -1) {
         switch (opt) {
@@ -111,10 +99,10 @@ void parse_args(int argc, char *argv[], struct server_app *app)
             app->server_port = atoi(optarg);
             break;
         case 'r':
-            app->remote_host = strdup(optarg);
+            app->backend_host = strdup(optarg);
             break;
         case 'p':
-            app->remote_port = atoi(optarg);
+            app->backend_port = atoi(optarg);
             break;
         default: /* Unrecognized parameter or "-?" */
             fprintf(stderr, "Usage: server [-b local_port] [-r remote_host] [-p remote_port]\n");
@@ -123,8 +111,8 @@ void parse_args(int argc, char *argv[], struct server_app *app)
         }
     }
 
-    if (app->remote_host == NULL) {
-        app->remote_host = strdup(DEFAULT_REMOTE_HOST);
+    if (app->backend_host == NULL) {
+        app->backend_host = strdup(DEFAULT_REMOTE_HOST);
     }
 }
 
@@ -157,23 +145,16 @@ std::string url_decode(const std::string &value) {
         int hex;
         char c;
         
-        // Read characters until encountering '%'
         while (ss.peek() != '%' && !ss.eof()) {
             decoded += ss.get();
         }
 
         if (ss.peek() == '%') {
-            // Skip '%'
-            ss.ignore();
-
-            // Read two hexadecimal characters
-            ss >> std::hex >> hex;
             
-            // Convert hexadecimal value to character
-            c = static_cast<char>(hex);
-            
-            // Add character to decoded string
-            decoded += c;
+            ss.ignore(); // Skip '%'
+            ss >> std::hex >> hex; // Read two hexadecimal characters
+            c = static_cast<char>(hex); // Convert hexadecimal value to character
+            decoded += c; 
         }
     }
 
@@ -184,18 +165,12 @@ void handle_request(struct server_app *app, int client_socket) {
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read;
 
-    // Read the request from HTTP client
-    // Note: This code is not ideal in the real world because it
-    // assumes that the request header is small enough and can be read
-    // once as a whole.
-    // However, the current version suffices for our testing.
     bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
     if (bytes_read <= 0) {
         return;  // Connection closed or error
     }
 
     buffer[bytes_read] = '\0';
-    // copy buffer to a new string
     std::string request(buffer);
 
     std::vector<std::string> requestTokens = split(request, "\r\n");
@@ -205,56 +180,23 @@ void handle_request(struct server_app *app, int client_socket) {
         std::cout << token << "\n";
     }
 
-    std::cout << "remote host: " << app->remote_host << "\n";
-    std::cout << app->remote_port << "\n";
-    std::cout << app->server_port << "\n";
-
-    // TODO: Parse the header and extract essential fields, e.g. file name
-    // Hint: if the requested path is "/" (root), default to index.html
     std::string requestURI = requestLineTokens[1];
-    std::cout << requestURI << '\n';
     requestURI.erase(0,1);
-    // size_t pos = requestURI.find("%20");
-    // while (pos != std::string::npos) {
-    //     requestURI.replace(pos, 3, " ");
-    //     pos = requestURI.find("%20");
-    // }
-    // pos = requestURI.find("%");
-    // while (pos != std::string::npos && pos < requestURI.length() - 2) {
 
-    // }
     requestURI = url_decode(requestURI);
-    std::cout << requestURI << '\n';
     std::string file_name = requestURI == "" ? "index.html" : requestURI;
-
-    // TODO: Implement proxy and call the function under condition
-    // specified in the spec
-    // if (need_proxy(...)) {
-    //    proxy_remote_file(app, client_socket, file_name);
-    // } else {
     std::string ext = get_file_extension(file_name);
+
     if (ext == "ts") {
         proxy_remote_file(app, client_socket, request);
     }
     else {
         serve_local_file(client_socket, file_name);
     }
-    //}
 }
 
 void serve_local_file(int client_socket, const std::string& path) {
-    // TODO: Properly implement serving of local files
-    // The following code returns a dummy response for all requests
-    // but it should give you a rough idea about what a proper response looks like
-    // What you need to do 
-    // (when the requested file exists):
-    // * Open the requested file
-    // * Build proper response headers (see details in the spec), and send them
-    // * Also send file content
-    // (When the requested file does not exist):
-    // * Generate a correct response
 
-    // get file extension
     std::string extension = get_file_extension(path);
 
     std::string response;
@@ -313,14 +255,7 @@ void serve_local_file(int client_socket, const std::string& path) {
 }
 
 void proxy_remote_file(struct server_app *app, int client_socket, const std::string& request) {
-    // TODO: Implement proxy request and replace the following code
-    // What's needed:
-    // * Connect to remote server (app->remote_server/app->remote_port)
-    // * Forward the original request to the remote server
-    // * Pass the response from remote server back
-    // Bonus:
-    // * When connection to the remote server fail, properly generate
-    // HTTP 502 "Bad Gateway" response
+
     int backend_socket;
     if ((backend_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
         std::cout << "socket creation error\n";
@@ -330,9 +265,9 @@ void proxy_remote_file(struct server_app *app, int client_socket, const std::str
     }
     struct sockaddr_in backend_addr;
     backend_addr.sin_family = AF_INET;
-    backend_addr.sin_port = htons(app->remote_port);
+    backend_addr.sin_port = htons(app->backend_port);
 
-    if (inet_pton(AF_INET, app->remote_host, &backend_addr.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, app->backend_host, &backend_addr.sin_addr) <= 0) {
         std::cout << "invalid address/address not supported\n";
         char response[] = "HTTP/1.0 502 Bad Gateway \r\n\r\n";
         send(client_socket, response, strlen(response), 0);
@@ -363,27 +298,4 @@ void proxy_remote_file(struct server_app *app, int client_socket, const std::str
 
     std::cout << "backend message received\n";
     close(backend_socket);
-    // ssize_t bytes_read;
-    // if ((bytes_read = recv(client_socket, buffer, sizeof(buffer) - 1, 0)) <= 0) {
-    //     std::cout << "error receiving message from backend\n";
-    //     char response[] = "HTTP/1.0 502 Bad Gateway \r\n\r\n";
-    //     send(client_socket, response, strlen(response), 0);
-    //     return;
-    // }
-    // buffer[bytes_read] = '\0';
-    //std::cout << "client message:\n";
-    //std::cout << response;
-
-    // size_t length = response.length();
-    // char cstr[length];
-    // char *ptr = cstr;
-    // strcpy(ptr, response.c_str());
-    // while (length > 0) {
-    //     int i = send(client_socket, ptr, length, 0);
-    //     if (i < 1) exit(1);
-    //     ptr += i;
-    //     length -= i;
-    // }
-
-    //send(client_socket, response.c_str(), response.length(), 0);
 }
