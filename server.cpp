@@ -37,6 +37,12 @@ std::string parse_filename_from_request(const std::string& request);
 std::string decode_uri(const std::string &value);
 std::string get_file_extension(const std::string& str);
 
+std::string read_file_content(std::fstream& file);
+std::string get_content_type(const std::string& path);
+std::string format_response(const std::string& code, const std::string& contentType, const std::string& content);
+std::string format_ok_response(const std::string& contentType, const std::string& content);
+void send_404_response(int client_socket);
+void send_file(int client_socket, std::fstream& file, const std::string& contentType);
 
 int main(int argc, char *argv[])
 {
@@ -210,62 +216,58 @@ std::string get_file_extension(const std::string& str) {
 }
 
 void serve_local_file(int client_socket, const std::string& path) {
-
-    std::string extension = get_file_extension(path);
-
-    std::string response;
     std::fstream file(path);
     if (!file.good()) {
-        response = "HTTP/1.0 404 Not Found\r\n"
-            "Content-Type: text/plain; charset=UTF-8\r\n"
-            "Content-Length: 15\r\n"
-            "\r\n"
-            "File not found.";
-    }
-
-    else if (extension == "html") {
-        response = "HTTP/1.0 200 OK\r\n"
-                      "Content-Type: text/html; charset=UTF-8\r\n"
-                      "Content-Length: ";
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        std::string fileContent = buffer.str();
-        response.append(std::to_string(fileContent.length()) + "\r\n\r\n");
-        response.append(fileContent);
-    }
-
-    else if (extension == "txt") {
-        response = "HTTP/1.0 200 OK\r\n"
-                      "Content-Type: text/plain; charset=UTF-8\r\n"
-                      "Content-Length: ";
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        std::string fileContent = buffer.str();
-        response.append(std::to_string(fileContent.length()) + "\r\n\r\n");
-        response.append(fileContent);
-    }
-    else if (extension == "jpg") {
-        response = "HTTP/1.0 200 OK\r\n"
-                      "Content-Type: image/jpeg\r\n"
-                      "Content-Length: ";
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        std::string fileContent = buffer.str();
-        response.append(std::to_string(fileContent.length()) + "\r\n\r\n");
-        response.append(fileContent);
+        send_404_response(client_socket);
     }
     else {
-        response = "HTTP/1.0 200 OK\r\n"
-                      "Content-Type: application/octet-stream\r\n"
-                      "Content-Length: ";
+        send_file(client_socket, file, get_content_type(path));
+    }
+}
+
+void send_file(int client_socket, std::fstream& file, const std::string& contentType) {
+    std::string content = read_file_content(file);
+    std::string response = format_ok_response(contentType, content);
+    send(client_socket, response.c_str(), response.length(), 0);
+}
+
+void send_404_response(int client_socket) {
+    std::string response = format_response("404 Not Found", "text/plain; charseet=UTF-8", "File not found");
+    send(client_socket, response.c_str(), response.length(), 0);
+}
+
+std::string read_file_content(std::fstream& file) {
         std::stringstream buffer;
         buffer << file.rdbuf();
-        std::string fileContent = buffer.str();
-        response.append(std::to_string(fileContent.length()) + "\r\n\r\n");
-        response.append(fileContent);
-    }
+        return buffer.str();
+}
 
-    send(client_socket, response.c_str(), response.length(), 0);
+std::string format_ok_response(const std::string& contentType, const std::string& content) {
+    return format_response("200 OK", contentType, content);
+}
+
+std::string format_response(const std::string& code, const std::string& contentType, const std::string& content) {
+    std::string response = "HTTP/1.0 " + code + "\r\n" 
+                            + "Content-Type: " + contentType + "\r\n"
+                            + "Content-Length: " + std::to_string(content.length()) + "\r\n\r\n"
+                            + content;
+    return response;
+}
+
+std::string get_content_type(const std::string& path) {
+    std::string extension = get_file_extension(path);
+    if (extension == "html") {
+        return "text/html; charset=UTF-8";
+    }
+    else if (extension == "txt") {
+        return "text/plain; charset=UTF-8";
+    }
+    else if (extension == "jpg") {
+        return "image/jpeg";
+    }
+    else {
+        return "application/octet-stream";
+    }
 }
 
 void proxy_remote_file(struct server_app *app, int client_socket, const std::string& request) {
