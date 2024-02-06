@@ -32,7 +32,7 @@ struct server_app {
 void parse_args(int argc, char *argv[], struct server_app *app);
 void handle_request(struct server_app *app, const SmartSocket& client_socket);
 void serve_local_file(const SmartSocket& socket, const std::string& path);
-void proxy_remote_file(struct server_app *app, const SmartSocket& client_socket, const std::string& request);
+void try_proxy_remote_file(struct server_app *app, const SmartSocket& client_socket, const std::string& request);
 
 std::string receive_client_request(const SmartSocket& socket);
 std::string parse_filename_from_request(const std::string& request);
@@ -45,6 +45,14 @@ std::string format_response(const std::string& code, const std::string& contentT
 std::string format_ok_response(const std::string& contentType, const std::string& content);
 void send_404_response(const SmartSocket& socket);
 void send_file(const SmartSocket& socket, std::fstream& file, const std::string& contentType);
+
+void send_502_response(const SmartSocket& socket);
+void forward_backend_response_to_client(const SmartSocket& backend_socket, const SmartSocket& client_socket);
+void inet_pton_throws_invalid_argument(int __af, const char *__restrict__ __cp, void *__restrict__ __buf);
+void proxy_remote_file(struct server_app *app, const SmartSocket& client_socket, const std::string& request);
+struct sockaddr_in init_backend_addr(struct server_app * app);
+void connect_backend_socket_to_remote_host(struct server_app *app, const SmartSocket& backend_socket);
+void forward_client_request_to_backend(const std::string& request, const SmartSocket& backend_socket);
 
 int main(int argc, char *argv[])
 {
@@ -142,7 +150,7 @@ void handle_request(struct server_app *app, const SmartSocket& client_socket) {
     std::string filename = parse_filename_from_request(request);
 
     if (get_file_extension(filename) == "ts") {
-        proxy_remote_file(app, client_socket, request);
+        try_proxy_remote_file(app, client_socket, request);
     }
     else {
         serve_local_file(client_socket, filename);
@@ -268,9 +276,48 @@ std::string get_content_type(const std::string& path) {
     }
 }
 
-void send_502_response(const SmartSocket& socket) {
-    std::string response = format_response("502 Bad Gateway", "text/plain", "");
-    socket.send(response.c_str(), response.length(), 0);
+void try_proxy_remote_file(struct server_app *app, const SmartSocket& client_socket, const std::string& request) {
+    try {
+        proxy_remote_file(app, client_socket, request);
+    } 
+    catch (std::bad_alloc& e) {
+        std::cout << "socket creation error\n";
+        send_502_response(client_socket);
+    }
+    catch (std::exception& e) {
+        std::cout << e.what();
+        send_502_response(client_socket);
+    }
+}
+
+void proxy_remote_file(struct server_app *app, const SmartSocket& client_socket, const std::string& request) {
+    SmartSocket backend_socket = SmartSocket(socket(AF_INET, SOCK_STREAM, 0));
+    connect_backend_socket_to_remote_host(app, backend_socket);
+    forward_client_request_to_backend(request, backend_socket);
+    forward_backend_response_to_client(backend_socket, client_socket);
+}
+
+void connect_backend_socket_to_remote_host(struct server_app *app, const SmartSocket& backend_socket) {
+    struct sockaddr_in backend_addr = init_backend_addr(app);
+    backend_socket.connect(reinterpret_cast<struct sockaddr*>(&backend_addr), sizeof(backend_addr));
+}
+
+struct sockaddr_in init_backend_addr(struct server_app * app) {
+    struct sockaddr_in backend_addr;
+    backend_addr.sin_family = AF_INET;
+    backend_addr.sin_port = htons(app->backend_port);
+    inet_pton_throws_invalid_argument(AF_INET, app->backend_host, &backend_addr.sin_addr);
+    return backend_addr;
+}
+
+void inet_pton_throws_invalid_argument(int __af, const char *__restrict__ __cp, void *__restrict__ __buf) {
+    if (inet_pton(__af, __cp, __buf) <= 0) {
+        throw std::invalid_argument("invalid address/address not supported");
+    }
+}
+
+void forward_client_request_to_backend(const std::string& request, const SmartSocket& backend_socket) {
+    backend_socket.send(request.c_str(), request.length(), 0);
 }
 
 void forward_backend_response_to_client(const SmartSocket& backend_socket, const SmartSocket& client_socket) {
@@ -286,38 +333,7 @@ void forward_backend_response_to_client(const SmartSocket& backend_socket, const
     } while (bytes_read > 0);
 }
 
-void inet_pton_throws_invalid_argument(int __af, const char *__restrict__ __cp, void *__restrict__ __buf) {
-    if (inet_pton(__af, __cp, __buf) <= 0) {
-        throw std::invalid_argument("invalid address/address not supported");
-    }
-}
-
-void proxy_remote_file(struct server_app *app, const SmartSocket& client_socket, const std::string& request) {
-    try {
-        SmartSocket backend_socket = SmartSocket(socket(AF_INET, SOCK_STREAM, 0));
-        struct sockaddr_in backend_addr;
-        backend_addr.sin_family = AF_INET;
-        backend_addr.sin_port = htons(app->backend_port);
-
-
-        inet_pton_throws_invalid_argument(AF_INET, app->backend_host, &backend_addr.sin_addr);
-
-        backend_socket.connect((struct sockaddr*)&backend_addr, sizeof(backend_addr));
-        backend_socket.send(request.c_str(), request.length(), 0);
-
-        std::cout << "backend message sent\n";
-        forward_backend_response_to_client(backend_socket, client_socket);
-    } 
-    catch (std::bad_alloc& e) {
-        std::cout << "socket creation error\n";
-        send_502_response(client_socket);
-    }
-    catch (std::invalid_argument& e) {
-        std::cout << e.what();
-        send_502_response(client_socket);
-    }
-    catch (std::runtime_error& e) {
-        std::cout << e.what();
-        send_502_response(client_socket);
-    }
+void send_502_response(const SmartSocket& socket) {
+    std::string response = format_response("502 Bad Gateway", "text/plain", "");
+    socket.send(response.c_str(), response.length(), 0);
 }
