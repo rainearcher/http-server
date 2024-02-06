@@ -13,6 +13,8 @@
 #include <string>
 #include <fstream>
 #include <sstream>
+#include <exception>
+#include "smartSocket.h"
 
 #define BUFFER_SIZE 1024
 #define DEFAULT_SERVER_PORT 8081
@@ -28,11 +30,11 @@ struct server_app {
 
 
 void parse_args(int argc, char *argv[], struct server_app *app);
-void handle_request(struct server_app *app, int client_socket);
-void serve_local_file(int client_socket, const std::string& path);
-void proxy_remote_file(struct server_app *app, int client_socket, const std::string& request);
+void handle_request(struct server_app *app, const SmartSocket& client_socket);
+void serve_local_file(const SmartSocket& socket, const std::string& path);
+void proxy_remote_file(struct server_app *app, const SmartSocket& client_socket, const std::string& request);
 
-std::string receive_client_request(int socket);
+std::string receive_client_request(const SmartSocket& socket);
 std::string parse_filename_from_request(const std::string& request);
 std::string decode_uri(const std::string &value);
 std::string get_file_extension(const std::string& str);
@@ -41,24 +43,19 @@ std::string read_file_content(std::fstream& file);
 std::string get_content_type(const std::string& path);
 std::string format_response(const std::string& code, const std::string& contentType, const std::string& content);
 std::string format_ok_response(const std::string& contentType, const std::string& content);
-void send_404_response(int client_socket);
-void send_file(int client_socket, std::fstream& file, const std::string& contentType);
+void send_404_response(const SmartSocket& socket);
+void send_file(const SmartSocket& socket, std::fstream& file, const std::string& contentType);
 
 int main(int argc, char *argv[])
 {
     struct server_app app;
-    int server_socket, client_socket;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len;
     int ret;
 
     parse_args(argc, argv, &app);
 
-    server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket == -1) {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
-    }
+    SmartSocket server_socket = SmartSocket(socket(AF_INET, SOCK_STREAM, 0));
 
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
@@ -67,14 +64,14 @@ int main(int argc, char *argv[])
     // The following allows the program to immediately bind to the port in case
     // previous run exits recently
     int optval = 1;
-    setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+    server_socket.setsockopt(SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
 
-    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
+    if (server_socket.bind((struct sockaddr*)&server_addr, sizeof(server_addr)) == -1) {
         perror("bind failed");
         exit(EXIT_FAILURE);
     }
 
-    if (listen(server_socket, 10) == -1) {
+    if (server_socket.listen(10) == -1) {
         perror("listen failed");
         exit(EXIT_FAILURE);
     }
@@ -82,18 +79,19 @@ int main(int argc, char *argv[])
     printf("Server listening on port %d\n", app.server_port);
 
     while (1) {
-        client_socket = accept(server_socket, (struct sockaddr*)&client_addr, &client_len);
-        if (client_socket == -1) {
+        try {
+            SmartSocket client_socket = SmartSocket(server_socket.accept((struct sockaddr*)&client_addr, &client_len));
+        
+            printf("Accepted connection from %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+            handle_request(&app, client_socket);
+
+        }
+        catch (std::bad_alloc& e) {
             perror("accept failed");
             continue;
         }
-        
-        printf("Accepted connection from %s:%d\n", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-        handle_request(&app, client_socket);
-        close(client_socket);
     }
 
-    close(server_socket);
     return 0;
 }
 
@@ -139,7 +137,7 @@ std::vector<std::string> split(std::string str, const std::string& delim) {
     return tokens;
 }
 
-void handle_request(struct server_app *app, int client_socket) {
+void handle_request(struct server_app *app, const SmartSocket& client_socket) {
     std::string request = receive_client_request(client_socket);
     std::string filename = parse_filename_from_request(request);
 
@@ -151,13 +149,13 @@ void handle_request(struct server_app *app, int client_socket) {
     }
 }
 
-std::string receive_client_request(int socket) {
+std::string receive_client_request(const SmartSocket& socket) {
     char buffer[BUFFER_SIZE];
     ssize_t bytes_read;
 
-    bytes_read = recv(socket, buffer, sizeof(buffer) - 1, 0);
+    bytes_read = socket.recv(buffer, sizeof(buffer) - 1, 0);
     if (bytes_read <= 0) {// Connection closed or error
-        exit(1);
+        throw std::runtime_error("client connection closed or recv error");
     }
 
     buffer[bytes_read] = '\0';
@@ -215,7 +213,7 @@ std::string get_file_extension(const std::string& str) {
     return "";
 }
 
-void serve_local_file(int client_socket, const std::string& path) {
+void serve_local_file(const SmartSocket& client_socket, const std::string& path) {
     std::fstream file(path);
     if (!file.good()) {
         send_404_response(client_socket);
@@ -225,15 +223,15 @@ void serve_local_file(int client_socket, const std::string& path) {
     }
 }
 
-void send_file(int client_socket, std::fstream& file, const std::string& contentType) {
+void send_file(const SmartSocket& client_socket, std::fstream& file, const std::string& contentType) {
     std::string content = read_file_content(file);
     std::string response = format_ok_response(contentType, content);
-    send(client_socket, response.c_str(), response.length(), 0);
+    client_socket.send(response.c_str(), response.length(), 0);
 }
 
-void send_404_response(int client_socket) {
+void send_404_response(const SmartSocket& client_socket) {
     std::string response = format_response("404 Not Found", "text/plain; charseet=UTF-8", "File not found");
-    send(client_socket, response.c_str(), response.length(), 0);
+    client_socket.send(response.c_str(), response.length(), 0);
 }
 
 std::string read_file_content(std::fstream& file) {
@@ -270,48 +268,56 @@ std::string get_content_type(const std::string& path) {
     }
 }
 
-void proxy_remote_file(struct server_app *app, int client_socket, const std::string& request) {
+void send_502_response(const SmartSocket& socket) {
+    std::string response = format_response("502 Bad Gateway", "text/plain", "");
+    socket.send(response.c_str(), response.length(), 0);
+}
 
-    int backend_socket;
-    if ((backend_socket = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        std::cout << "socket creation error\n";
-        char response[] = "HTTP/1.0 502 Bad Gateway \r\n\r\n";
-        send(client_socket, response, strlen(response), 0);
-        return;
-    }
-    struct sockaddr_in backend_addr;
-    backend_addr.sin_family = AF_INET;
-    backend_addr.sin_port = htons(app->backend_port);
-
-    if (inet_pton(AF_INET, app->backend_host, &backend_addr.sin_addr) <= 0) {
-        std::cout << "invalid address/address not supported\n";
-        char response[] = "HTTP/1.0 502 Bad Gateway \r\n\r\n";
-        send(client_socket, response, strlen(response), 0);
-        return;
-    }
-
-    int status;
-    if ((status = connect(backend_socket, (struct sockaddr*)&backend_addr, sizeof(backend_addr)))) {
-        std::cout << "backend connection failed\n";
-        char response[] = "HTTP/1.0 502 Bad Gateway \r\n\r\n";
-        send(client_socket, response, strlen(response), 0);
-        return;
-    }
-    send(backend_socket, request.c_str(), request.length(), 0);
-    std::cout << "backend message sent\n";
+void forward_backend_response_to_client(const SmartSocket& backend_socket, const SmartSocket& client_socket) {
     char buffer[BUFFER_SIZE];
-    size_t bytes_read;                 
-    std::string response = "";
+    size_t bytes_read;
     do {
-        bytes_read = recv(backend_socket, buffer, BUFFER_SIZE - 1, 0);
+        bytes_read = backend_socket.recv(buffer, BUFFER_SIZE - 1, 0);
         if (bytes_read <= 0) {
             break;
         }
         buffer[bytes_read] = '\0';
-        send(client_socket, buffer, bytes_read, 0);
-        response.append(buffer, bytes_read);
+        client_socket.send(buffer, bytes_read, 0);
     } while (bytes_read > 0);
+}
 
-    std::cout << "backend message received\n";
-    close(backend_socket);
+void inet_pton_throws_invalid_argument(int __af, const char *__restrict__ __cp, void *__restrict__ __buf) {
+    if (inet_pton(__af, __cp, __buf) <= 0) {
+        throw std::invalid_argument("invalid address/address not supported");
+    }
+}
+
+void proxy_remote_file(struct server_app *app, const SmartSocket& client_socket, const std::string& request) {
+    try {
+        SmartSocket backend_socket = SmartSocket(socket(AF_INET, SOCK_STREAM, 0));
+        struct sockaddr_in backend_addr;
+        backend_addr.sin_family = AF_INET;
+        backend_addr.sin_port = htons(app->backend_port);
+
+
+        inet_pton_throws_invalid_argument(AF_INET, app->backend_host, &backend_addr.sin_addr);
+
+        backend_socket.connect((struct sockaddr*)&backend_addr, sizeof(backend_addr));
+        backend_socket.send(request.c_str(), request.length(), 0);
+
+        std::cout << "backend message sent\n";
+        forward_backend_response_to_client(backend_socket, client_socket);
+    } 
+    catch (std::bad_alloc& e) {
+        std::cout << "socket creation error\n";
+        send_502_response(client_socket);
+    }
+    catch (std::invalid_argument& e) {
+        std::cout << e.what();
+        send_502_response(client_socket);
+    }
+    catch (std::runtime_error& e) {
+        std::cout << e.what();
+        send_502_response(client_socket);
+    }
 }

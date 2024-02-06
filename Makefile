@@ -1,13 +1,17 @@
 CC=g++
-SRC=server.cpp
-OBJ=server
+SRC=server.cpp smartSocket.cpp
+INCLUDES=smartSocket.h
+EXE=server
 
-all: $(OBJ)
+all: $(EXE) 
+	
+$(EXE): $(SRC)
+	$(CC) -o $(EXE) $(SRC)
 
 proxy: $(SRC)
 	$(CC) $< -o $@
 
 clean:
-	rm -rf $(OBJ)
+	rm -rf $(EXE)
 
 .PHONY: all clean

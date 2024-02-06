@@ -8,3 +8,4 @@ downloadfile
 backend
 *.zip
 *.7z
+*.o
