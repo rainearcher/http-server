@@ -1,21 +1,12 @@
-# README
-
-**IMPORTANT**: Before proceeding, ensure you thoroughly read and understand the project specification. The README is just a supplementary guide, while the project specification is the primary source of project requirements and details. Any discrepancies or uncertainties should be addressed based on the content in the project specification.
+# C++ HTTP Server
 
 ## Project Description
 
-This project is a basic HTTP server, designed to handle requests by either serving local files or proxying remote files. The starter code provides a foundation upon which you can build the necessary logic to serve requests based on their content and the presence of files locally.
-
-## File Structure
-
-- **server.c**: The main server code containing the logic for handling HTTP requests, parsing arguments, and serving/proxying content.
-- **makefile**: The build system for compiling and cleaning the project.
-- **index.html**: A video player page used for testing the serving of local HTML content. It instructs the browser to request the output.m3u8 video manifest.
-- **output.m3u8**: A video manifest used for testing the serving of local content. It contains information about video chunks and instructs the browser to request `.ts` video chunks, which are hosted on our remote video server.
+This project is a basic HTTP server, designed to handle requests by either serving local files or proxying remote video files.
 
 ## Build Instructions
 
-To build the project, ensure you have `gcc` installed on your system. Navigate to the directory containing the `server.c` and `makefile`, then use the following commands:
+To build the project, ensure you have `g++` installed on your system. 
 
 - To compile the project:
     ```bash
@@ -41,19 +32,32 @@ After compiling, you can run the server using the following command:
 - `-r remote_host`: Specify the remote host's address for proxying. Defaults to `131.179.176.34`.
 - `-p remote_port`: Specify the remote port for proxying. Defaults to `5001`.
 
-## Project Tasks
+## Serving local files
+The server is able to serve files located in the same directory as server.c with the following extensions:
 
-To complete this project, consider addressing the following TODOs:
+.html, .txt, .jpg
 
-1. **Request Parsing**: Parse the header of the incoming HTTP request to extract essential fields like the requested file name.
-2. **Local File Serving**: Implement the logic for serving files that exist locally.
-3. **Proxying Remote Files**: If a file does not exist locally, or based on any other criterion you define, you might want to proxy the request to another server.
-4. **Handling Errors (Extra Credits)**: Implement proper error responses.
+All other files are served as binary data.
 
-## Notes
+## Proxying
+To test the reverse-proxy functionality, startup a backend server with the following steps.
 
-The starter code assumes that the HTTP request header is small enough to be read once as a whole, which may not be ideal in a real-world scenario but suffices for this project's scope.
-
-Remember to check for memory leaks and handle them appropriately, particularly when dealing with dynamically allocated memory.
-
-Good luck with your project!
+1. Install ffmpeg
+2. use this command to convert a .mp4 video file into .ts fiels and .m3u8 file: 
+```
+ffmpeg -i <videofile>.mp4 -profile:v baseline -level 3.0 -start_number 0
+-hls_time 10 -hls_list_size 0 -f hls <manifestfilename>.m3u8
+-hls_segment_filename "<tsfilename>%d.ts"
+```
+3. Place the .m3u8 file into the same directory as the server.c file.
+4. Place the .ts files into a separate directory: 
+```
+mkdir newdir
+mv *.ts newdir
+```
+5. cd to the new directory and run a python command to start up the backend server:
+```
+cd newdir
+python3 -m http.server 5001
+```
+6. now run the main server as before and navigate to `localhost:8081` to see your video played.
